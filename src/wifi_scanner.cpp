@@ -7,8 +7,8 @@ void wifiSetup() {
   WiFi.mode(WIFI_AP_STA);
 
   // Start hotspot FIRST so web server works immediately
-  WiFi.softAP("ESP32-Scanner", "12345678");
-  Serial.println("Hotspot started! http://192.168.4.1");
+  WiFi.softAP("ESP32-Master", "12345678");
+  Serial.println("Hotspot started! http://192.168.5.1");
 
   // Then try connecting to router in background
   WiFi.begin(ssid, password);
