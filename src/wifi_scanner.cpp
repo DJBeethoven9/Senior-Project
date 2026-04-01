@@ -1,10 +1,14 @@
 #include "wifi_scanner.h"
+#include "esp_wifi.h"
 
-const char* ssid     = "Jax";
-const char* password = "Simjim123";
+const char* ssid     = "Maitham";
+const char* password = "123456788";
 
 void wifiSetup() {
+  WiFi.persistent(false);
   WiFi.mode(WIFI_AP_STA);
+  WiFi.setSleep(false);
+  esp_wifi_set_ps(WIFI_PS_NONE);
 
   // Start hotspot FIRST so web server works immediately
   WiFi.softAP("ESP32-Scanner", "12345678");
