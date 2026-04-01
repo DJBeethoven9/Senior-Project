@@ -13,6 +13,7 @@ void setup() {
 }
 
 void loop() {
-  rgbLoop();
+  csiAnalyze();   // update presenceScore & humanDetected at ~5 Hz
+  rgbSetPresence(humanDetected, calibrationDone);
   webServerLoop();
 }

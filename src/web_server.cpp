@@ -1,40 +1,71 @@
 #include "web_server.h"
 #include "csi.h"
+#include <string.h>
 
 WebServer server(80);
 
 extern portMUX_TYPE csiMux;
 
 void handleData() {
+  // Snapshot ISR-shared data under the shortest possible critical section.
+  // Build the JSON string only after releasing the lock so the CSI ISR is
+  // not blocked during slow String operations.
+  int      snap_rssi;
+  uint32_t snap_packets;
+  float    snap_amp[CSI_SUBCARRIERS];
+  float    snap_phase[CSI_SUBCARRIERS];
+  float    snap_history[HISTORY_SIZE];
+  int      snap_histIdx;
+
   portENTER_CRITICAL(&csiMux);
+  snap_rssi    = currentRSSI;
+  snap_packets = csiPacketCount;
+  memcpy(snap_amp,     csiSmoothed,  sizeof(snap_amp));   // EMA-filtered
+  memcpy(snap_phase,   csiPhase,     sizeof(snap_phase));
+  memcpy(snap_history, rssiHistory,  sizeof(snap_history));
+  snap_histIdx = historyIndex;
+  portEXIT_CRITICAL(&csiMux);
+
+  // Presence/calibration variables are only written from csiAnalyze() in the
+  // main loop (never from the ISR), so they are safe to read outside the lock.
+  bool  snap_presence    = humanDetected;
+  float snap_score       = presenceScore;
+  bool  snap_calDone     = calibrationDone;
+  float snap_calProgress = calibrationProgress;
+  float snap_threshold   = detectionThreshold;
 
   String json = "{";
-  json += "\"rssi\":" + String(currentRSSI) + ",";
-  json += "\"packets\":" + String(csiPacketCount) + ",";
+  json += "\"rssi\":"    + String(snap_rssi)    + ",";
+  json += "\"packets\":" + String(snap_packets) + ",";
 
   json += "\"amp\":[";
   for (int i = 0; i < CSI_SUBCARRIERS; i++) {
-    json += String(csiAmplitude[i], 1);
+    json += String(snap_amp[i], 1);
     if (i < CSI_SUBCARRIERS - 1) json += ",";
   }
   json += "],";
 
   json += "\"phase\":[";
   for (int i = 0; i < CSI_SUBCARRIERS; i++) {
-    json += String(csiPhase[i], 1);
+    json += String(snap_phase[i], 1);
     if (i < CSI_SUBCARRIERS - 1) json += ",";
   }
   json += "],";
 
   json += "\"history\":[";
   for (int i = 0; i < HISTORY_SIZE; i++) {
-    int idx = (historyIndex + i) % HISTORY_SIZE;
-    json += String(rssiHistory[idx], 1);
+    int idx = (snap_histIdx + i) % HISTORY_SIZE;
+    json += String(snap_history[idx], 1);
     if (i < HISTORY_SIZE - 1) json += ",";
   }
-  json += "]}";
+  json += "],";
 
-  portEXIT_CRITICAL(&csiMux);
+  json += "\"presence\":"      + String(snap_presence    ? "true" : "false") + ",";
+  json += "\"presenceScore\":" + String(snap_score, 1)                       + ",";
+  json += "\"calDone\":"       + String(snap_calDone     ? "true" : "false") + ",";
+  json += "\"calProgress\":"   + String(snap_calProgress, 1)                 + ",";
+  json += "\"threshold\":"     + String(snap_threshold, 2)                   + "}";
+
   server.send(200, "application/json", json);
 }
 
@@ -60,11 +91,29 @@ void handleRoot() {
     .legend { display: flex; gap: 12px; font-size: 11px; color: #888; margin-top: 6px; flex-wrap: wrap; }
     .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; }
     #status { text-align: center; font-size: 11px; color: #444; margin-top: 10px; }
+    .pbanner { border-radius: 14px; padding: 20px 16px 16px; margin-bottom: 16px; text-align: center; border: 2px solid #2a2a4e; background: #1a1a2e; transition: background 0.5s, border-color 0.5s; }
+    .pbanner.detected { background: #1a0808; border-color: #ff3333; }
+    .pbanner.empty    { background: #081a0c; border-color: #33ff66; }
+    .picon { font-size: 44px; margin-bottom: 6px; }
+    .plabel { font-size: 24px; font-weight: bold; letter-spacing: 3px; margin-bottom: 4px; color: #555; }
+    .plabel.detected { color: #ff4444; }
+    .plabel.empty    { color: #44ff88; }
+    .psub { font-size: 12px; color: #777; margin-bottom: 10px; }
+    .sbar-bg { background: #111; border-radius: 8px; height: 10px; overflow: hidden; }
+    .sbar { height: 100%; border-radius: 8px; width: 0%; transition: width 0.4s, background 0.4s; }
   </style>
 </head>
 <body>
   <h1>📡 ESP32-S3 CSI Analyzer</h1>
-  <p class='sub'>Channel State Information — Live</p>
+  <p class='sub'>Channel State Information — Human Presence Detection</p>
+
+  <div class='pbanner' id='pbanner'>
+    <div class='picon' id='picon'>📡</div>
+    <div class='plabel' id='plabel'>SCANNING...</div>
+    <div class='psub'  id='psub'>Collecting signal data...</div>
+    <div class='sbar-bg'><div class='sbar' id='sbar'></div></div>
+  </div>
+
   <div class='stats'>
     <div class='stat'><div class='stat-val' id='rssiVal'>--</div><div class='stat-lbl'>RSSI (dBm)</div></div>
     <div class='stat'><div class='stat-val' id='packetVal'>--</div><div class='stat-lbl'>CSI Packets</div></div>
@@ -167,6 +216,44 @@ void handleRoot() {
   const ampCtx   = getCtx('ampCanvas');
   const phaseCtx = getCtx('phaseCanvas');
   const rssiCtx  = getCtx('rssiCanvas');
+  function updatePresence(d) {
+    const banner = document.getElementById('pbanner');
+    const icon   = document.getElementById('picon');
+    const label  = document.getElementById('plabel');
+    const sub    = document.getElementById('psub');
+    const bar    = document.getElementById('sbar');
+    banner.className = 'pbanner';
+    label.className  = 'plabel';
+
+    if (!d.calDone) {
+      // Calibration phase — keep room empty
+      icon.textContent     = '🔧';
+      label.textContent    = 'CALIBRATING...';
+      sub.textContent      = 'Keep room EMPTY — measuring noise floor (' +
+                              d.calProgress.toFixed(0) + '%)';
+      bar.style.background = '#00aaff';
+      bar.style.width      = d.calProgress + '%';
+      return;
+    }
+
+    if (d.presence) {
+      banner.classList.add('detected');
+      label.classList.add('detected');
+      icon.textContent  = '🚨';
+      label.textContent = 'HUMAN DETECTED';
+      bar.style.background = '#ff4444';
+    } else {
+      banner.classList.add('empty');
+      label.classList.add('empty');
+      icon.textContent  = '✅';
+      label.textContent = 'ROOM EMPTY';
+      bar.style.background = '#44ff88';
+    }
+    sub.textContent = (d.presence ? 'Person present in room' : 'No presence detected') +
+                      ' — confidence ' + d.presenceScore.toFixed(0) +
+                      '%  (threshold: ' + d.threshold.toFixed(2) + ')';
+    bar.style.width = d.presenceScore + '%';
+  }
   async function update() {
     try {
       const d = await (await fetch('/data')).json();
@@ -175,6 +262,7 @@ void handleRoot() {
       document.getElementById('packetVal').textContent = d.packets;
       document.getElementById('qualVal').textContent   = q.t;
       document.getElementById('qualVal').style.color   = q.c;
+      updatePresence(d);
       drawBars(ampCtx,   d.amp,     'amp',   0,    Math.max(...d.amp, 1));
       drawBars(phaseCtx, d.phase,   'phase', -180, 180);
       drawLine(rssiCtx,  d.history, '#44ff88', -100, 0);
