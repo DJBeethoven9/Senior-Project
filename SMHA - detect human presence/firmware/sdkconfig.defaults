@@ -1,0 +1,16 @@
+CONFIG_IDF_TARGET="esp32s3"
+
+# Console = UART0, routed through the CH343 USB-UART bridge (the "UART"
+# port on this DevKitC-1 variant). Switch to the chip's native USB by
+# setting CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y if you ever wire the
+# board's "USB" port instead.
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+
+# Wi-Fi tuning for steady CSI capture
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=16
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=32
+CONFIG_ESP_WIFI_CSI_ENABLED=y
+CONFIG_ESP_WIFI_AMPDU_RX_ENABLED=y
+
+# Console baud = 115200 (matches idf.py monitor default; CSI fits comfortably).
+CONFIG_ESP_CONSOLE_UART_BAUDRATE=115200
