@@ -15,6 +15,8 @@ from typing import Optional, Sequence
 
 import numpy as np
 
+from csi_filter import CSIDenoiser
+
 
 @dataclass
 class DetectorState:
@@ -45,6 +47,8 @@ class DetectorState:
     selected_subcarriers: int = 0
     total_subcarriers: int = 0
     auto_tuned: bool = False
+    ai_filter_enabled: bool = False
+    ai_filter_components: int = 0
 
 
 class PresenceDetector:
@@ -62,6 +66,9 @@ class PresenceDetector:
         enter_hits_required: int = 4,          # Fix A: was 1
         auto_tune: bool = True,
         subcarrier_keep_ratio: float = 0.85,
+        warmup_seconds: float = 0.0,
+        stuck_exit_seconds: float = 6.0,
+        ai_filter: bool = True,
     ):
         self.baseline_size = baseline_size
         self.window = window
@@ -71,6 +78,12 @@ class PresenceDetector:
         self.enter_hits_required = max(1, enter_hits_required)  # Fix A: no upper cap
         self.auto_tune = auto_tune
         self.subcarrier_keep_ratio = min(max(subcarrier_keep_ratio, 0.25), 1.0)
+        self.warmup_seconds = max(0.0, warmup_seconds)
+        self.stuck_exit_seconds = max(0.0, stuck_exit_seconds)
+        self._denoiser = CSIDenoiser(enabled=ai_filter)
+        self._warmup_start: Optional[float] = (
+            time.monotonic() if self.warmup_seconds > 0 else None
+        )
 
         self._base_motion_threshold = threshold_multiplier
         self._base_shift_threshold = shift_threshold
@@ -108,6 +121,10 @@ class PresenceDetector:
         self._last_fast_shift_score: Optional[float] = None
         self._last_stable_shift_score: Optional[float] = None
 
+        # Stuck-PRESENCE watchdog: timestamp when fast motion first dropped
+        # below the exit threshold while PRESENCE was active. Cleared on motion.
+        self._low_motion_since: Optional[float] = None
+
     def _reset_thresholds(self) -> None:
         self.threshold_multiplier = self._base_motion_threshold
         self.shift_threshold = self._base_shift_threshold
@@ -127,7 +144,19 @@ class PresenceDetector:
         self._phase_baseline_noise = None
         self._rms_baseline_mean = None
         self._rms_baseline_std = None
+        self._denoiser.reset()
+        self._warmup_start = (
+            time.monotonic() if self.warmup_seconds > 0 else None
+        )
         self._reset_runtime_state()
+
+    def warmup_remaining_s(self) -> float:
+        if self.warmup_seconds <= 0 or self._warmup_start is None:
+            return 0.0
+        return max(0.0, self.warmup_seconds - (time.monotonic() - self._warmup_start))
+
+    def warmup_active(self) -> bool:
+        return self.warmup_remaining_s() > 0.0
 
     def _reset_runtime_state(self) -> None:
         self._smooth_stable_motion = None
@@ -142,6 +171,7 @@ class PresenceDetector:
         self._last_stable_motion_ratio = None
         self._last_fast_shift_score = None
         self._last_stable_shift_score = None
+        self._low_motion_since = None
 
     @staticmethod
     def _matrix(
@@ -315,6 +345,12 @@ class PresenceDetector:
         self._selected_idx = self._select_subcarriers(baseline)
         selected = self._apply_selected(baseline)
 
+        # AI filter: fit the denoiser on the empty-room (selected) baseline.
+        # Subsequent stable/fast windows go through Hampel + PCA before scoring.
+        self._denoiser.fit_baseline(selected)
+        if self._denoiser.fitted:
+            selected = self._denoiser.filter(selected)
+
         self._baseline_mean = np.mean(selected, axis=0)
         baseline_std_vec = np.std(selected, axis=0)
         noise_floor = max(float(np.percentile(baseline_std_vec, 50)), 1e-6)
@@ -427,8 +463,24 @@ class PresenceDetector:
             )
             if fast_hit:
                 self._presence_hold_until = now + self.hold_seconds
-            if below_exit and now >= self._presence_hold_until:
+
+            # Stuck-PRESENCE watchdog: if motion has been quiet for stuck_exit_seconds,
+            # force exit even when shift_score remains elevated due to multipath
+            # rearrangement that didn't snap back when the person left.
+            if sm_fast_motion < self.motion_exit_threshold:
+                if self._low_motion_since is None:
+                    self._low_motion_since = now
+            else:
+                self._low_motion_since = None
+            stuck_timeout = (
+                self.stuck_exit_seconds > 0.0
+                and self._low_motion_since is not None
+                and (now - self._low_motion_since) >= self.stuck_exit_seconds
+            )
+
+            if (below_exit and now >= self._presence_hold_until) or stuck_timeout:
                 self._presence_active = False
+                self._low_motion_since = None
                 # Give partial credit so COM5 re-enters in ~1 frame, not 4
                 self._consecutive_hits = max(self.enter_hits_required - 1, 1)
                 trigger = None
@@ -440,7 +492,9 @@ class PresenceDetector:
         elif confirmed_enter:
             self._presence_active = True
             self._presence_hold_until = now + self.hold_seconds
+            self._low_motion_since = None
         else:
+            self._low_motion_since = None
             trigger = None
 
         hold_remaining_s = 0.0
@@ -493,6 +547,8 @@ class PresenceDetector:
             ),
             total_subcarriers=self._total_subcarriers,
             auto_tuned=self._auto_tuned,
+            ai_filter_enabled=self._denoiser.enabled,
+            ai_filter_components=self._denoiser.n_components,
         )
 
     def _waiting_state(self, status: str, progress: float) -> DetectorState:
@@ -513,6 +569,8 @@ class PresenceDetector:
             ),
             total_subcarriers=self._total_subcarriers,
             auto_tuned=self._auto_tuned,
+            ai_filter_enabled=self._denoiser.enabled,
+            ai_filter_components=self._denoiser.n_components,
         )
 
     def _update_from_frames(
@@ -535,6 +593,7 @@ class PresenceDetector:
         stable_size = min(self.window, n)
         stable_amp = self._matrix(frames[-stable_size:], self._baseline_width)
         stable_amp = self._apply_selected(stable_amp)
+        stable_amp = self._denoiser.filter(stable_amp)
         if stable_amp.shape[0] >= 2:
             stable_motion = self._motion_score(stable_amp) / max(self.baseline_std, 1e-9)
             stable_shift = self._shift_score(stable_amp)
@@ -544,6 +603,7 @@ class PresenceDetector:
         # Fix B: fast window — used for exit decisions
         fast_amp = self._matrix(frames[-self.fast_window:], self._baseline_width)
         fast_amp = self._apply_selected(fast_amp)
+        fast_amp = self._denoiser.filter(fast_amp)
         if fast_amp.shape[0] >= 2:
             fast_motion = self._motion_score(fast_amp) / max(self.baseline_std, 1e-9)
             fast_shift = self._shift_score(fast_amp)
@@ -568,16 +628,19 @@ class PresenceDetector:
                 stable_phase = self._phase_motion_score(stable_ph)
 
         # Fix D: drift compensation — slowly adapt baseline mean during NO_PRESENCE
-        if (
-            not self._presence_active
-            and self._baseline_mean is not None
-            and stable_amp.shape[0] > 0
-        ):
-            alpha = 1e-3
+        # and also during PRESENCE when motion has died down (lets the baseline
+        # catch up after a person leaves so a stuck shift_score eventually relaxes).
+        drift_alpha = 0.0
+        if self._baseline_mean is not None and stable_amp.shape[0] > 0:
+            if not self._presence_active:
+                drift_alpha = 1e-3
+            elif fast_motion < self.motion_exit_threshold:
+                drift_alpha = 1e-3
+        if drift_alpha > 0.0:
             recent_mean = np.mean(stable_amp, axis=0)
             w = min(recent_mean.shape[0], self._baseline_mean.shape[0])
             self._baseline_mean[:w] = (
-                (1 - alpha) * self._baseline_mean[:w] + alpha * recent_mean[:w]
+                (1 - drift_alpha) * self._baseline_mean[:w] + drift_alpha * recent_mean[:w]
             )
 
         self._last_fast_motion_ratio = fast_motion
@@ -600,6 +663,11 @@ class PresenceDetector:
         frames: Optional[Sequence[Sequence[float]]] = None,
         phase_frames: Optional[Sequence[Sequence[float]]] = None,
     ) -> DetectorState:
+        if self.warmup_seconds > 0 and self._warmup_start is not None:
+            elapsed = time.monotonic() - self._warmup_start
+            if elapsed < self.warmup_seconds:
+                return self._waiting_state("CALIBRATING", elapsed / self.warmup_seconds)
+
         if frames:
             state = self._update_from_frames(frames, samples, phase_frames)
             if state is not None:

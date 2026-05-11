@@ -1,7 +1,12 @@
-"""Flask app: pairs one or more serial CSI readers with detectors.
+"""Flask app: pairs one or more CSI readers (USB or UDP) with detectors.
 
-Single-board mode remains the default. Multi-board mode can be enabled with
-`--ports COM7 COM5` to compare each ESP32-S3 and show a fused status.
+Usage:
+    python app.py --usb COM6                # one ESP via USB
+    python app.py --usb COM6 COM7           # two ESPs via USB
+    python app.py --udp 5005                # one ESP sending CSI over Wi-Fi UDP
+    python app.py --usb COM6 --udp 5005     # mix transports
+
+With no flags, the app prompts you interactively.
 """
 
 from __future__ import annotations
@@ -14,8 +19,9 @@ from typing import Any, Optional
 
 import numpy as np
 from flask import Flask, jsonify, render_template
+from serial.tools import list_ports
 
-from csi_reader import CSIReader
+from csi_reader import BaseCSIReader, CSIReader, UDPCSIReader
 from detector import PresenceDetector
 
 app = Flask(__name__)
@@ -24,9 +30,11 @@ app = Flask(__name__)
 @dataclass
 class BoardRuntime:
     port: str
-    reader: CSIReader
+    reader: BaseCSIReader
     detector: PresenceDetector
+    transport: str = "usb"
     presence_start: Optional[float] = field(default=None)  # Fix F: monotonic time PRESENCE began
+    warmup_buffer_cleared: bool = field(default=False)
 
 
 boards: list[BoardRuntime] = []
@@ -42,10 +50,20 @@ def reset():
     for board in boards:
         board.detector.reset()
         board.reader.reset_buffers()
+        board.warmup_buffer_cleared = False
     return jsonify({"ok": True})
 
 
 def _board_status(board: BoardRuntime) -> dict[str, Any]:
+    # Drop frames captured during the warmup countdown so the baseline is
+    # collected from frames after the user has stepped away.
+    if board.detector.warmup_active():
+        board.reader.reset_buffers()
+        board.warmup_buffer_cleared = False
+    elif not board.warmup_buffer_cleared:
+        board.reader.reset_buffers()
+        board.warmup_buffer_cleared = True
+
     with board.reader.lock:
         samples = list(board.reader.amplitudes)
         frames_buf = list(board.reader.csi_frames)
@@ -69,11 +87,14 @@ def _board_status(board: BoardRuntime) -> dict[str, Any]:
 
     age = (time.time() - last_ts) if last_ts else None
     active = age is not None and age < 3.0
+    warmup_remaining_s = board.detector.warmup_remaining_s()
     return {
         "port": board.port,
+        "transport": board.transport,
         "active": active,
         "status": state.status,
         "progress": state.progress,
+        "warmup_remaining_s": warmup_remaining_s,
         "baseline_std": state.baseline_std,
         "current_std": state.current_std,
         "ratio": state.ratio,
@@ -99,6 +120,8 @@ def _board_status(board: BoardRuntime) -> dict[str, Any]:
         "selected_subcarriers": state.selected_subcarriers,
         "total_subcarriers": state.total_subcarriers,
         "auto_tuned": state.auto_tuned,
+        "ai_filter_enabled": state.ai_filter_enabled,
+        "ai_filter_components": state.ai_filter_components,
         "trigger": state.trigger,
         "frames_seen": frames,
         "parse_errors": errors,
@@ -226,9 +249,15 @@ def _fuse_status(board_states: list[dict[str, Any]]) -> dict[str, Any]:
             progress = 1.0
             trigger = None
 
+    warmup_remaining_s = max(
+        (float(b.get("warmup_remaining_s") or 0.0) for b in board_states),
+        default=0.0,
+    )
+
     return {
         "status": status,
         "progress": progress,
+        "warmup_remaining_s": warmup_remaining_s,
         "confidence": round(confidence, 1),
         "trigger": trigger,
         "board_count": len(board_states),
@@ -260,6 +289,8 @@ def _fuse_status(board_states: list[dict[str, Any]]) -> dict[str, Any]:
         "selected_subcarriers": primary.get("selected_subcarriers"),
         "total_subcarriers": primary.get("total_subcarriers"),
         "auto_tuned": primary.get("auto_tuned"),
+        "ai_filter_enabled": primary.get("ai_filter_enabled"),
+        "ai_filter_components": primary.get("ai_filter_components"),
         "frames_seen": sum(int(b["frames_seen"] or 0) for b in board_states),
         "parse_errors": sum(int(b["parse_errors"] or 0) for b in board_states),
         "buffer_size": sum(int(b["buffer_size"] or 0) for b in board_states),
@@ -283,6 +314,52 @@ def heatmap():
     })
 
 
+def _prompt_for_sources() -> tuple[list[str], list[int]]:
+    """Interactively pick USB ports and/or UDP ports."""
+    print("How is your ESP connected?")
+    print("  [1] USB cable (serial COM port)")
+    print("  [2] Wi-Fi / power-bank (UDP)")
+    print("  [3] Both")
+    choice = input("Select 1/2/3: ").strip() or "1"
+
+    usb: list[str] = []
+    udp: list[int] = []
+
+    if choice in ("1", "3"):
+        available = [p.device for p in list_ports.comports()]
+        if not available:
+            print("(no serial ports detected)")
+        else:
+            print("Available serial ports:")
+            for i, dev in enumerate(available, 1):
+                print(f"  [{i}] {dev}")
+            raw = input("Pick USB port number(s), comma-separated: ").strip()
+            for tok in (t.strip() for t in raw.split(",") if t.strip()):
+                if tok.isdigit():
+                    idx = int(tok)
+                    if 1 <= idx <= len(available):
+                        usb.append(available[idx - 1])
+                        continue
+                if tok.upper() in (a.upper() for a in available):
+                    usb.append(tok.upper())
+                    continue
+                raise SystemExit(f"Invalid serial selection: {tok}")
+
+    if choice in ("2", "3"):
+        raw = input("UDP port(s) to listen on, comma-separated [5005]: ").strip()
+        if not raw:
+            udp.append(5005)
+        else:
+            for tok in (t.strip() for t in raw.split(",") if t.strip()):
+                if not tok.isdigit():
+                    raise SystemExit(f"Invalid UDP port: {tok}")
+                udp.append(int(tok))
+
+    if not usb and not udp:
+        raise SystemExit("No transports selected.")
+    return usb, udp
+
+
 def _new_detector(args: argparse.Namespace) -> PresenceDetector:
     return PresenceDetector(
         baseline_size=args.baseline_size,
@@ -297,13 +374,23 @@ def _new_detector(args: argparse.Namespace) -> PresenceDetector:
         fast_window=args.fast_window,
         auto_tune=not args.no_auto_tune,
         subcarrier_keep_ratio=args.subcarrier_keep_ratio,
+        warmup_seconds=args.warmup_seconds,
+        stuck_exit_seconds=args.stuck_exit_seconds,
+        ai_filter=not args.no_ai_filter,
     )
 
 
 def main():
     p = argparse.ArgumentParser(description="SMHA Phase 1/1.5 backend")
-    p.add_argument("--port", default="COM7", help="Serial port for single-board mode")
-    p.add_argument("--ports", nargs="+", help="Serial ports for multi-board mode, e.g. COM7 COM5")
+    p.add_argument("--usb", nargs="+", default=None,
+                   help="One or more USB serial ports, e.g. --usb COM6 COM7")
+    p.add_argument("--udp", nargs="+", type=int, default=None,
+                   help="One or more UDP listen ports, e.g. --udp 5005 5006")
+    p.add_argument("--udp-host", default="0.0.0.0",
+                   help="Interface to bind UDP sockets to (default: all)")
+    # Back-compat aliases
+    p.add_argument("--port", default=None, help=argparse.SUPPRESS)
+    p.add_argument("--ports", nargs="+", default=None, help=argparse.SUPPRESS)
     p.add_argument("--baud", type=int, default=115200)
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--http-port", type=int, default=5000)
@@ -318,15 +405,42 @@ def main():
     p.add_argument("--hold-seconds", type=float, default=1.5)
     p.add_argument("--enter-hits", type=int, default=4)
     p.add_argument("--no-auto-tune", action="store_true")
+    p.add_argument("--no-ai-filter", action="store_true",
+                   help="Disable the Hampel+PCA denoising stage")
     p.add_argument("--subcarrier-keep-ratio", type=float, default=0.85)
+    p.add_argument("--warmup-seconds", type=float, default=10.0,
+                   help="Pre-calibration countdown so the user can leave the room")
+    p.add_argument("--stuck-exit-seconds", type=float, default=6.0,
+                   help="Force exit PRESENCE after this many seconds of quiet motion "
+                        "even if shift_score is still elevated (multipath rearrangement)")
     args = p.parse_args()
 
-    selected_ports = args.ports if args.ports else [args.port]
-    for port in selected_ports:
-        reader = CSIReader(port, args.baud)
-        boards.append(BoardRuntime(port=port, reader=reader, detector=_new_detector(args)))
+    usb_ports: list[str] = list(args.usb or [])
+    udp_ports: list[int] = list(args.udp or [])
+
+    # Back-compat: --port/--ports map onto --usb
+    if args.ports:
+        usb_ports.extend(args.ports)
+    if args.port:
+        usb_ports.append(args.port)
+
+    if not usb_ports and not udp_ports:
+        usb_ports, udp_ports = _prompt_for_sources()
+
+    for com in usb_ports:
+        reader = CSIReader(com, args.baud)
+        boards.append(BoardRuntime(port=com, reader=reader,
+                                   detector=_new_detector(args), transport="usb"))
         reader.start()
 
+    for up in udp_ports:
+        reader = UDPCSIReader(up, args.udp_host)
+        boards.append(BoardRuntime(port=reader.port, reader=reader,
+                                   detector=_new_detector(args), transport="udp"))
+        reader.start()
+
+    print(f"Started {len(boards)} board(s): "
+          f"{', '.join(f'{b.port} ({b.transport})' for b in boards)}")
     app.run(host=args.host, port=args.http_port, debug=False, use_reloader=False)
 
 

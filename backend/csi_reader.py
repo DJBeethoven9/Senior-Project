@@ -1,14 +1,18 @@
-"""Reads the ESP32-S3 CSI CSV stream over a serial port.
+"""CSI ingestion: serial (USB) or UDP (Wi-Fi).
 
-The reader keeps both a legacy per-frame RMS amplitude and the per-subcarrier
-amplitude vector. The detector uses the vectors because collapsing a CSI frame
-to one RMS value can hide motion that only affects part of the channel.
+Both transports parse the same one-line CSV format the firmware emits:
+
+    CSI,<ts_us>,<rssi>,<rate>,<sig_mode>,<mcs>,<cwb>,<channel>,<len>,[i0 r0 i1 r1 ...]
+
+The serial path reads it from a COM port; the UDP path reads it from a
+datagram socket (each packet is treated as one or more lines).
 """
 
 from __future__ import annotations
 
 import math
 import re
+import socket
 import threading
 import time
 from collections import deque
@@ -16,17 +20,17 @@ from typing import Deque, Optional
 
 import serial
 
-# CSI,<ts>,<rssi>,<rate>,<sig_mode>,<mcs>,<cwb>,<channel>,<len>,[i0 r0 i1 r1 ...]
 _LINE = re.compile(
     r"^CSI,(-?\d+),(-?\d+),(\d+),(\d+),(\d+),(\d+),(\d+),(\d+),\[([-\d ]+)\]\s*$"
 )
 
 
-class CSIReader(threading.Thread):
-    def __init__(self, port: str, baudrate: int = 115200, buffer_size: int = 600):
-        super().__init__(daemon=True, name="CSIReader")
+class BaseCSIReader(threading.Thread):
+    """Shared buffers + parser. Subclasses implement the I/O loop."""
+
+    def __init__(self, port: str, buffer_size: int = 600):
+        super().__init__(daemon=True, name=f"CSIReader[{port}]")
         self._port = port
-        self._baudrate = baudrate
         self._stop = threading.Event()
 
         self.lock = threading.Lock()
@@ -42,6 +46,10 @@ class CSIReader(threading.Thread):
     @property
     def port(self) -> str:
         return self._port
+
+    @property
+    def transport(self) -> str:
+        return "usb"
 
     def stop(self) -> None:
         self._stop.set()
@@ -80,6 +88,34 @@ class CSIReader(threading.Thread):
         rms = math.sqrt(sq / len(amps)) if amps else 0.0
         return rssi, rms, amps, phases
 
+    def _ingest_line(self, line: str) -> None:
+        if not line.startswith("CSI,"):
+            return
+        parsed = self._parse(line)
+        if parsed is None:
+            self.parse_errors += 1
+            return
+        rssi, rms, amps, phases = parsed
+        with self.lock:
+            self.amplitudes.append(rms)
+            self.csi_frames.append(amps)
+            self.phase_frames.append(phases)
+            self.rssi.append(rssi)
+            self.last_packet_ts = time.time()
+            self.frames_seen += 1
+
+
+class CSIReader(BaseCSIReader):
+    """Reads CSI lines from a serial (USB) port."""
+
+    def __init__(self, port: str, baudrate: int = 115200, buffer_size: int = 600):
+        super().__init__(port=port, buffer_size=buffer_size)
+        self._baudrate = baudrate
+
+    @property
+    def transport(self) -> str:
+        return "usb"
+
     def run(self) -> None:
         while not self._stop.is_set():
             try:
@@ -94,21 +130,53 @@ class CSIReader(threading.Thread):
                             line = raw.decode("ascii", errors="ignore").strip()
                         except Exception:
                             continue
-                        if not line.startswith("CSI,"):
-                            continue
-                        parsed = self._parse(line)
-                        if parsed is None:
-                            self.parse_errors += 1
-                            continue
-                        rssi, rms, amps, phases = parsed
-                        with self.lock:
-                            self.amplitudes.append(rms)
-                            self.csi_frames.append(amps)
-                            self.phase_frames.append(phases)
-                            self.rssi.append(rssi)
-                            self.last_packet_ts = time.time()
-                            self.frames_seen += 1
+                        self._ingest_line(line)
             except serial.SerialException as e:
                 self.last_error = str(e)
                 print(f"[csi_reader:{self._port}] serial error: {e}; retrying in 2s")
+                time.sleep(2.0)
+
+
+class UDPCSIReader(BaseCSIReader):
+    """Reads CSI lines from a UDP datagram socket.
+
+    Each datagram may contain one or more newline-separated CSI lines.
+    Label appears in the UI as e.g. ``UDP:5005``.
+    """
+
+    def __init__(self, udp_port: int, bind_host: str = "0.0.0.0",
+                 buffer_size: int = 600):
+        super().__init__(port=f"UDP:{udp_port}", buffer_size=buffer_size)
+        self._udp_port = udp_port
+        self._bind_host = bind_host
+
+    @property
+    def transport(self) -> str:
+        return "udp"
+
+    def run(self) -> None:
+        while not self._stop.is_set():
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                sock.settimeout(1.0)
+                sock.bind((self._bind_host, self._udp_port))
+                self.last_error = None
+                print(f"[csi_reader:{self._port}] listening on "
+                      f"{self._bind_host}:{self._udp_port}")
+                with sock:
+                    while not self._stop.is_set():
+                        try:
+                            data, _ = sock.recvfrom(4096)
+                        except socket.timeout:
+                            continue
+                        try:
+                            text = data.decode("ascii", errors="ignore")
+                        except Exception:
+                            continue
+                        for line in text.splitlines():
+                            self._ingest_line(line.strip())
+            except OSError as e:
+                self.last_error = str(e)
+                print(f"[csi_reader:{self._port}] socket error: {e}; retrying in 2s")
                 time.sleep(2.0)
