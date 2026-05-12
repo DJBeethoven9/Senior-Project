@@ -1,10 +1,8 @@
-"""Flask app: pairs one or more CSI readers (USB or UDP) with detectors.
+"""Flask app: pairs the ESP32-S3 CSI stream with a presence detector.
 
 Usage:
-    python app.py --usb COM6                # one ESP via USB
-    python app.py --usb COM6 COM7           # two ESPs via USB
-    python app.py --udp 5005                # one ESP sending CSI over Wi-Fi UDP
-    python app.py --usb COM6 --udp 5005     # mix transports
+    python app.py --usb COM7                # current one-ESP USB flow
+    python app.py --udp 5005                # optional wireless test listener
 
 With no flags, the app prompts you interactively.
 """
@@ -221,14 +219,14 @@ def _fuse_status(board_states: list[dict[str, Any]]) -> dict[str, Any]:
     else:
         confidence = max(float(b["confidence"] or 0.0) for b in active)
 
-        # Fix F: hardened fusion rules — drop bare OR-of-PRESENCE
-        # Rule 1: any board >=70% confidence sustained >=350 ms (single-board friendly)
+        # Fix F: single-node status gate - drop bare OR-of-PRESENCE
+        # Rule 1: any stream >=70% confidence sustained >=350 ms
         high_sustained = [
             b for b in active
             if float(b["confidence"] or 0.0) >= 70.0
             and float(b.get("presence_sustained_s", 0.0)) >= 0.35
         ]
-        # Rule 2: two or more boards with >=55% confidence simultaneously
+        # Legacy fallback: two or more streams with >=55% confidence simultaneously
         medium = [b for b in active if float(b["confidence"] or 0.0) >= 55.0]
 
         if high_sustained or len(medium) >= 2:
@@ -315,10 +313,10 @@ def heatmap():
 
 
 def _prompt_for_sources() -> tuple[list[str], list[int]]:
-    """Interactively pick USB ports and/or UDP ports."""
+    """Interactively pick the USB port or optional UDP listener."""
     print("How is your ESP connected?")
     print("  [1] USB cable (serial COM port)")
-    print("  [2] Wi-Fi / power-bank (UDP)")
+    print("  [2] Optional wireless test listener (UDP)")
     print("  [3] Both")
     choice = input("Select 1/2/3: ").strip() or "1"
 
@@ -333,7 +331,7 @@ def _prompt_for_sources() -> tuple[list[str], list[int]]:
             print("Available serial ports:")
             for i, dev in enumerate(available, 1):
                 print(f"  [{i}] {dev}")
-            raw = input("Pick USB port number(s), comma-separated: ").strip()
+            raw = input("Pick USB port number for the ESP32-S3: ").strip()
             for tok in (t.strip() for t in raw.split(",") if t.strip()):
                 if tok.isdigit():
                     idx = int(tok)
@@ -346,7 +344,7 @@ def _prompt_for_sources() -> tuple[list[str], list[int]]:
                 raise SystemExit(f"Invalid serial selection: {tok}")
 
     if choice in ("2", "3"):
-        raw = input("UDP port(s) to listen on, comma-separated [5005]: ").strip()
+        raw = input("UDP port to listen on [5005]: ").strip()
         if not raw:
             udp.append(5005)
         else:
@@ -381,11 +379,11 @@ def _new_detector(args: argparse.Namespace) -> PresenceDetector:
 
 
 def main():
-    p = argparse.ArgumentParser(description="SMHA Phase 1/1.5 backend")
+    p = argparse.ArgumentParser(description="SMHA single-node CSI backend")
     p.add_argument("--usb", nargs="+", default=None,
-                   help="One or more USB serial ports, e.g. --usb COM6 COM7")
+                   help="USB serial port for the ESP32-S3, e.g. --usb COM7")
     p.add_argument("--udp", nargs="+", type=int, default=None,
-                   help="One or more UDP listen ports, e.g. --udp 5005 5006")
+                   help="Optional UDP listen port for wireless tests, e.g. --udp 5005")
     p.add_argument("--udp-host", default="0.0.0.0",
                    help="Interface to bind UDP sockets to (default: all)")
     # Back-compat aliases
@@ -439,7 +437,7 @@ def main():
                                    detector=_new_detector(args), transport="udp"))
         reader.start()
 
-    print(f"Started {len(boards)} board(s): "
+    print(f"Started {len(boards)} sensor stream(s): "
           f"{', '.join(f'{b.port} ({b.transport})' for b in boards)}")
     app.run(host=args.host, port=args.http_port, debug=False, use_reloader=False)
 

@@ -1,15 +1,15 @@
 # SMHA - Wi-Fi CSI Human Presence Detection
 
-**Phase 1**: prove that a single ESP32-S3 can detect human presence in a
-room by observing variance in Wi-Fi Channel State Information (CSI). No
-machine learning, no activity classification - only a binary
+**Current flow**: one ESP32-S3 detects human presence in a room by
+observing variance in Wi-Fi Channel State Information (CSI). No camera,
+no wearable, and no activity classification - only a binary
 *presence / no-presence* signal driven by an empty-room baseline.
 
-Phase 1.5 adds non-ML detector stabilization and optional multi-board
-serial fusion for testing. Phase 2 (later) will layer signal processing
-and learned models on top of the same data path. The reference project
-[ruvnet/RuView](https://github.com/ruvnet/RuView) is the long-term
-inspiration for Phase 2; Phase 1 deliberately stays simple.
+The backend keeps the single-node path focused: warm-up countdown,
+empty-room calibration, auto-tuned thresholds, Hampel/PCA denoising,
+and a live Flask dashboard. Multi-ESP localization and activity
+classification are future work; the senior-project demo uses one
+ESP32-S3 sensing node.
 
 ---
 
@@ -18,7 +18,7 @@ inspiration for Phase 2; Phase 1 deliberately stays simple.
 ```
 +---------------+   Wi-Fi (2.4 GHz)    +------------+
 | ESP32-S3-N16R8| --- ICMP echo -----> |  Home AP   |
-|  (firmware)   | <-- echo replies --- | (Sadiq)    |
+|  (firmware)   | <-- echo replies --- | (csi-test) |
 +-------+-------+                      +------------+
         |  USB ("UART" port) -> CH343 bridge -> COM7 @ 115200
         |  ASCII CSV: CSI,<ts>,<rssi>,...,[i0 r0 i1 r1 ...]
@@ -38,26 +38,26 @@ amplitude is meaningless on its own - it depends on AP distance,
 antenna orientation, walls, RSSI, and the AP's internal scheduling. The
 first ~10 seconds (100 frames) measure the empty-room baseline. From
 then on, the backend compares recent per-subcarrier motion and
-baseline-shift scores against that empty-room profile. Phase 1.5 also
-selects the cleaner subcarriers per board and auto-tunes thresholds
-from empty-room noise. Skipping calibration would require either a
-labelled training set or a learned anomaly model - both Phase 2 work.
+baseline-shift scores against that empty-room profile. The detector
+also selects the cleaner subcarriers for the ESP32-S3 stream and
+auto-tunes thresholds from empty-room noise. Skipping calibration would
+require either a labelled training set or a learned anomaly model - both
+future work.
 
 ---
 
 ## 2. Hardware
 
-- **3 x ESP32-S3-N16R8** (16 MB flash, 8 MB PSRAM) modules with 2.4 GHz
-  PCB or external antennas. The boards in use expose a **CH343
-  USB-UART bridge** on the "UART" port of the dev kit.
-- **Phase 1 uses one board by default** (default port `COM7`). Phase
-  1.5 can read a second board, e.g. `COM5`, for optional serial fusion.
-  `COM6` is kept as a spare test board.
+- **1 x ESP32-S3-N16R8** (16 MB flash, 8 MB PSRAM) module with a 2.4 GHz
+  PCB or external antenna. The dev kit exposes a **CH343 USB-UART
+  bridge** on the "UART" port.
+- The current setup uses one board. The examples use `COM7`; replace it
+  with whichever COM port Windows assigns to the ESP32-S3.
 - The firmware is configured for **UART0 console at 115200 baud** so
   that output is bridged through the CH343 to whatever COM port
   Windows assigns. Do **not** plug into the chip's native "USB" port -
   this build is not configured for USB-Serial-JTAG console.
-- 2.4 GHz AP `Sadiq`. The ESP32-S3 cannot use 5 GHz networks.
+- 2.4 GHz AP `csi-test`. The ESP32-S3 cannot use 5 GHz networks.
 
 ## 3. Software prerequisites
 
@@ -97,7 +97,7 @@ ESP-IDF install: <https://docs.espressif.com/projects/esp-idf/en/v5.3.1/esp32s3/
 ## 5. Firmware build & flash
 
 The Wi-Fi credentials are baked into `firmware/main/main.c`
-(`SSID=Sadiq`, `PASS=66336211`).
+(`SSID=csi-test`, `PASS=12345678`).
 
 PowerShell on Windows requires execution-policy bypass to source the
 IDF activator script:
@@ -139,33 +139,24 @@ cd "<path>\backend"
 python -m venv .venv               # py -3.13 -m venv .venv also works if launcher is on PATH
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-python app.py                      # uses --port COM7 --baud 115200 by default
+python app.py --usb COM7           # one ESP32-S3 over USB serial
 ```
 
-Override the port for the other boards later:
+You can also run `python app.py` with no flags and select the USB port
+from the interactive prompt.
 
-```powershell
-python app.py --port COM6
-python app.py --port COM5
-```
-
-Run two ESP32-S3 boards together for Phase 1.5 fusion:
-
-```powershell
-python app.py --ports COM7 COM5
-```
-
-The dashboard shows each board separately, a fused status, and CSI
-heatmaps for amplitude, baseline difference, and phase shape. Fusion
-declares presence when **one board reaches ≥80% confidence sustained
-for ≥500 ms**, or when **two boards simultaneously reach ≥55%
-confidence**. This hardened rule eliminates brief false-positive spikes
-that a single noisy frame can no longer trigger.
+The dashboard shows the single sensor stream, the current presence
+status, confidence, and CSI heatmaps for amplitude, baseline
+difference, and phase shape. The room status declares presence when
+the active ESP32-S3 reaches at least 70% confidence sustained for at
+least 350 ms. This short stability gate keeps a single noisy frame from
+triggering the room status.
 
 The heatmap/phase-debug view does **not** require firmware changes. The
 existing serial CSV already carries the signed I/Q bytes needed to
-compute amplitude and phase on the backend. Firmware changes are only
-needed later for wireless UDP streaming or higher-rate binary CSI.
+compute amplitude and phase on the backend. The backend still has UDP
+reader support for later wireless tests, but the current senior-project
+flow uses the USB serial stream from the firmware.
 
 Dashboard: <http://127.0.0.1:5000>.
 
@@ -175,7 +166,7 @@ interpreter to `backend\.venv\Scripts\python.exe` (Ctrl+Shift+P -
 
 ### Operating procedure
 
-1. Power the ESP32-S3, confirm it associates to `Sadiq`.
+1. Power the ESP32-S3, confirm it associates to `csi-test`.
 2. Start `app.py`. **Leave the room and stay still for ~10 seconds**
    while the dashboard reads `CALIBRATING xx%`.
 3. Once the status flips to `NO PRESENCE`, walk through the area
@@ -183,9 +174,9 @@ interpreter to `backend\.venv\Scripts\python.exe` (Ctrl+Shift+P -
    `PRESENCE DETECTED` within a second or two (4 consecutive qualifying
    frames are required before the state changes).
 4. Click **Recalibrate** any time you need to relearn the baseline
-   (e.g. after moving furniture or relocating the board).
+   (e.g. after moving furniture or relocating the node).
 
-## 7. Detector design — Phase 1.5 stabilisation fixes
+## 7. Detector design - single-node stabilisation fixes
 
 Six root-cause fixes were applied to eliminate ~1 s false-positive
 PRESENCE flickers that the earlier detector produced from single noisy
@@ -198,7 +189,7 @@ frames.
 | **C** Tighter auto-tune | Empty-room thresholds computed at **p95+0.25** (motion) and **p99+0.50** (shift); clamps widened to **[1.30, 2.00]** and **[1.40, 3.0]** | Baseline noise at the 95th/99th percentile sets the floor; occasional outliers don't bring thresholds too low |
 | **D** Drift compensation | During `NO_PRESENCE`, baseline mean drifts toward recent values at **α=1e-3** per update; frozen during `PRESENCE` | Slow environmental changes (temperature, furniture) don't accumulate as false shift scores |
 | **E** Phase co-confirmation | Amplitude motion alone is not enough — **phase motion** (per-subcarrier phase std normalized to baseline) must also exceed its threshold; OR a baseline-shift hit suffices without phase confirmation | Phase and amplitude are independently disturbed by movement; requiring both for the motion path rejects amplitude-only glitches |
-| **F** Fusion hardening | Fused PRESENCE requires **1 board ≥80% confidence sustained ≥500 ms**, OR **≥2 boards ≥55% confidence** simultaneously; bare OR-of-board-PRESENCE removed | A single transient spike on one board cannot flip the fused output |
+| **F** Single-node status gate | Room-level PRESENCE requires the ESP32-S3 stream to reach **>=70% confidence sustained >=350 ms**; bare pass-through of the detector state is avoided | A single transient spike cannot flip the room output |
 
 ## 8. Tuning knobs
 
@@ -216,7 +207,7 @@ frames.
 | Smoothing alpha          | `backend/app.py` / `--smoothing-alpha` | 0.65 | Higher = faster response, lower = smoother |
 | Presence hold            | `backend/app.py` / `--hold-seconds` | 1.5 | Seconds to keep presence after a weak window |
 | Enter hits               | `backend/app.py` / `--enter-hits` | 4 | Qualifying windows required before entering PRESENCE (one miss costs 1 point, not a full reset) |
-| Auto tune                | `backend/app.py` / `--no-auto-tune` | on | Learns per-board thresholds from empty-room noise |
+| Auto tune                | `backend/app.py` / `--no-auto-tune` | on | Learns per-sensor thresholds from empty-room noise |
 | Subcarrier keep ratio    | `backend/app.py` / `--subcarrier-keep-ratio` | 0.85 | Fraction of cleaner subcarriers to keep |
 
 ## 9. Troubleshooting
@@ -233,24 +224,24 @@ frames.
   `idf.py monitor` is still holding the port.
 - **Status flickers between PRESENCE / NO_PRESENCE** - raise
   `--hold-seconds`, lower the exit thresholds, or increase the
-  detection window to 60. If using multiple boards, ensure all boards
-  have calibrated cleanly before testing.
+  detection window to 60. Recalibrate with the room empty if the
+  baseline was captured while someone was moving.
 - **False presence when the room is empty** - raise
   `--motion-threshold` toward 1.4 or `--shift-threshold` toward 2.3.
   Alternatively run with `--no-auto-tune` to keep manual thresholds.
 - **Detection is too slow** - reduce `--enter-hits` from 4 to 2,
   reduce `--fast-window`, or raise `--smoothing-alpha`. Note that one
   miss no longer resets the counter to zero; it only subtracts 1 point.
-- **Board stays stuck at PRESENCE after leaving** - the hold timer now
+- **Sensor stays stuck at PRESENCE after leaving** - the hold timer now
   uses the fast window (1 s) to decide whether to extend, so the maximum
   exit delay is fast-window (1 s) + hold-seconds (1.5 s) = ~2.5 s. If
   still stuck, raise `--motion-exit-threshold` slightly or reduce
   `--hold-seconds` further.
-- **Single-board shows PRESENCE but fused status stays NO_PRESENCE** -
-  the board's confidence has not yet reached 80% sustained for 500 ms.
+- **Sensor card is active but room status stays NO_PRESENCE** -
+  the ESP32-S3 confidence has not yet reached 70% sustained for 350 ms.
   Check the `confidence` line in the dashboard debug panel; if it peaks
-  below 80%, lower `--motion-threshold` or `--shift-threshold`.
-- **Auto tuning made a board too strict** - run with `--no-auto-tune`
+  below 70%, lower `--motion-threshold` or `--shift-threshold`.
+- **Auto tuning made the sensor too strict** - run with `--no-auto-tune`
   and tune `--motion-threshold` / `--shift-threshold` manually.
 - **`PRESENCE` immediately after calibration even when empty** - the
   baseline window saw motion; click **Recalibrate** with the room
@@ -271,13 +262,13 @@ frames.
   `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force`
   in the same PowerShell session before sourcing the activator.
 
-## 10. Out of scope for Phase 1
+## 10. Out of scope for the current demo
 
-- Mesh networking between boards
+- Multi-ESP fusion or localization
 - Multi-channel scanning (RuView-style)
 - Activity classification (sitting / walking / falling)
 - Vital-sign extraction (breathing, heart rate)
 - Any ML model
 - Persistent storage of CSI traces
 
-These are Phase 2 concerns and are not addressed here.
+These are future concerns and are not addressed here.

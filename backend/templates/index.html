@@ -311,13 +311,12 @@
 
   <div id="sidebar">
     <div class="sb-section">
-      <h3>Sensor Boards</h3>
+      <h3>Sensor Stream</h3>
       <div id="board-cards"></div>
       <div id="empty-state" class="empty-state" style="display:none">
-        <strong>No boards streaming yet.</strong><br/>
-        Plug an ESP into USB, or power it from a power-bank and let it
-        send CSI over UDP. Restart the backend with <code>--usb COMx</code>
-        or <code>--udp 5005</code>.
+        <strong>No ESP32-S3 stream yet.</strong><br/>
+        Plug the ESP into USB and restart the backend with
+        <code>--usb COMx</code>. UDP is available for later wireless tests.
       </div>
     </div>
     <div class="sb-section">
@@ -330,7 +329,7 @@
 <footer>
   <button onclick="doRecalibrate()">↺ Recalibrate</button>
   <button onclick="doResetPos()">⤢ Reset positions</button>
-  <span class="footer-hint">Drag sensor nodes to match their physical positions in the room.</span>
+  <span class="footer-hint">Drag the sensor node to match its physical position in the room.</span>
 </footer>
 
 <script>
@@ -339,9 +338,7 @@
    Persisted in localStorage so the user's layout survives refresh.
 ═══════════════════════════════════════════════════════════════ */
 const DEFAULT_POS = {
-  COM7: { x: 0.18, y: 0.20 },
-  COM5: { x: 0.80, y: 0.74 },
-  COM6: { x: 0.50, y: 0.48 },
+  COM7: { x: 0.18, y: 0.35 },
 };
 let boardPos = JSON.parse(localStorage.getItem('smha-pos') || 'null') || structuredClone(DEFAULT_POS);
 function savePOS() { localStorage.setItem('smha-pos', JSON.stringify(boardPos)); }
@@ -379,7 +376,7 @@ let animT       = 0;   // 0–1 looping at ~60 fps
 /* ═══════════════════════════════════════════════════════════════
    COLOR HELPERS
 ═══════════════════════════════════════════════════════════════ */
-const BOARD_HEX = { COM7: '#58a6ff', COM5: '#f78166', COM6: '#3fb950' };
+const BOARD_HEX = { COM7: '#58a6ff' };
 function bColor(port) { return BOARD_HEX[port] ?? '#8b949e'; }
 
 function hexToRgb(hex) {
@@ -530,17 +527,22 @@ function drawRadarRings(boards) {
 ═══════════════════════════════════════════════════════════════ */
 function drawPersonBlob(boards) {
   if ((lastStatus.status || '') !== 'PRESENCE') return;
-  let wx = 0, wy = 0, wt = 0;
-  for (const b of boards) {
-    if (!b.active) continue;
-    const conf = Math.max(0, (b.confidence || 0) / 100);
-    if (conf < 0.05) continue;
-    const p = getPos(b.port);
-    wx += p.x * conf; wy += p.y * conf; wt += conf;
+  const active = boards
+    .map(b => ({ ...b, conf: Math.max(0, (b.confidence || 0) / 100) }))
+    .filter(b => b.active && b.conf >= 0.05);
+  if (!active.length) return;
+
+  let cx = CW * 0.56, cy = CH * 0.52;
+  if (active.length > 1) {
+    let wx = 0, wy = 0, wt = 0;
+    for (const b of active) {
+      const p = getPos(b.port);
+      wx += p.x * b.conf; wy += p.y * b.conf; wt += b.conf;
+    }
+    if (wt < 0.01) return;
+    cx = (wx / wt) * CW;
+    cy = (wy / wt) * CH;
   }
-  if (wt < 0.01) return;
-  const cx   = (wx / wt) * CW;
-  const cy   = (wy / wt) * CH;
   const gConf = Math.max(0, (lastStatus.confidence || 0) / 100);
   const pulse  = 0.78 + 0.22 * Math.sin(animT * Math.PI * 2 * 2.5);
 
@@ -792,7 +794,7 @@ function updateSysMeta(s) {
     `<span>motion thr</span><span class="v">${fmt(s.motion_threshold,2)}</span>` +
     `<span>shift thr</span><span class="v">${fmt(s.shift_threshold,2)}</span>` +
     `<span>auto-tune</span><span class="v">${s.auto_tuned?'on':'off'}</span>` +
-    `<span>ai filter</span><span class="v">${aiTxt}</span>` +
+    `<span>CSI filter</span><span class="v">${aiTxt}</span>` +
     `<span>hold rem</span><span class="v">${fmt(s.hold_remaining_s,1)}s</span>`;
 }
 

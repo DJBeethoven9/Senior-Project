@@ -1,10 +1,10 @@
-"""Phase 1.5 presence detector — fixes A-E applied.
+"""Single-node presence detector - fixes A-E applied.
 
 A: Consecutive-hit entry gate (enter_hits_required=4 resets on any miss)
-B: Asymmetric windows — entry uses stable window only, exit uses fast window only
+B: Asymmetric windows - entry uses stable window only, exit uses fast window only
 C: Tighter auto-tune (p95+0.25 motion, p99+0.50 shift), wider clamps [1.30,2.00]/[1.40,3.0]
 D: Baseline drift compensation during NO_PRESENCE (alpha=1e-3 per update)
-E: Phase co-confirmation — amplitude AND phase must both fire, OR shift alone
+E: Phase co-confirmation - amplitude AND phase must both fire, OR shift alone
 """
 
 from __future__ import annotations
@@ -345,7 +345,7 @@ class PresenceDetector:
         self._selected_idx = self._select_subcarriers(baseline)
         selected = self._apply_selected(baseline)
 
-        # AI filter: fit the denoiser on the empty-room (selected) baseline.
+        # CSI filter: fit the denoiser on the empty-room (selected) baseline.
         # Subsequent stable/fast windows go through Hampel + PCA before scoring.
         self._denoiser.fit_baseline(selected)
         if self._denoiser.fitted:
@@ -431,7 +431,7 @@ class PresenceDetector:
         motion_hit = (amplitude_hit and phase_hit) or shift_hit
 
         # Fix A (revised): decay by 1 on miss instead of hard reset to zero.
-        # This means one bad frame costs one point, not all progress — COM5 can
+        # This means one bad frame costs one point, not all progress; the stream can
         # survive occasional dropped frames while still requiring sustained hits for entry.
         if motion_hit:
             self._consecutive_hits = min(
@@ -456,7 +456,7 @@ class PresenceDetector:
         if self._presence_active:
             # Use fast-window values to extend the hold timer so the stable window's
             # 3-second memory does not keep resetting the timer after the person leaves
-            # (COM7 "stuck at 100%" root cause).
+            # (earlier "stuck at 100%" root cause).
             fast_hit = (
                 sm_fast_motion >= self.threshold_multiplier
                 or sm_fast_shift >= self.shift_threshold
@@ -481,7 +481,7 @@ class PresenceDetector:
             if (below_exit and now >= self._presence_hold_until) or stuck_timeout:
                 self._presence_active = False
                 self._low_motion_since = None
-                # Give partial credit so COM5 re-enters in ~1 frame, not 4
+                # Give partial credit so the stream re-enters in ~1 frame, not 4
                 self._consecutive_hits = max(self.enter_hits_required - 1, 1)
                 trigger = None
             elif below_exit:

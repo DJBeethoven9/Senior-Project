@@ -1,6 +1,6 @@
 """Unsupervised CSI denoiser used to clean amplitude frames before scoring.
 
-Two stages, both learned per-board with no labels and no offline training:
+Two stages, both learned per-sensor stream with no labels and no offline training:
 
 1. Hampel filter across time for each subcarrier — replaces samples that lie
    more than ``n_sigmas * MAD`` from the local rolling median with the median
