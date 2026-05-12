@@ -1160,13 +1160,13 @@ Bootloader binary size 0x5260 bytes. 0x2da0 bytes (36%) free.
 [1000/1006] Building C object esp-idf/main/CMakeFiles/__idf_main.dir/main.c.obj
 [1001/1006] Linking C static library esp-idf\main\libmain.a
 [1002/1006] Generating ld/sections.ld
-[1003/1006] Building C object CMakeFiles/smha_csi.elf.dir/project_elf_src_esp32s3.c.obj
-[1004/1006] Linking CXX executable smha_csi.elf
+[1003/1006] Building C object CMakeFiles/swmd_csi.elf.dir/project_elf_src_esp32s3.c.obj
+[1004/1006] Linking CXX executable swmd_csi.elf
 [1005/1006] Generating binary image from built executable
 esptool.py v4.11.0
 Creating esp32s3 image...
 Merged 2 ELF sections
 Successfully created esp32s3 image.
-Generated C:/Users/jafo0/OneDrive - University of Bahrain/Desktop/Senior-Project-Clone/firmware/build/smha_csi.bin
-[1006/1006] cmd.exe /C "cd /D "C:\Users\jafo0\OneDrive - University of Bahrain\Desktop\Senior-Project-Clone\firmware\build\esp-idf\esptool_py" && C:\Espressif\python_env\idf5.3_py3.13_env\Scripts\python.exe C:/Espressif/frameworks/esp-idf-v5.3.1/components/partition_table/check_sizes.py --offset 0x8000 partition --type app "C:/Users/jafo0/OneDrive - University of Bahrain/Desktop/Senior-Project-Clone/firmware/build/partition_table/partition-table.bin" "C:/Users/jafo0/OneDrive - University of Bahrain/Desktop/Senior-Project-Clone/firmware/build/smha_csi.bin""
-smha_csi.bin binary size 0xbebb0 bytes. Smallest app partition is 0x100000 bytes. 0x41450 bytes (25%) free.
+Generated C:/Users/jafo0/OneDrive - University of Bahrain/Desktop/Senior-Project-Clone/firmware/build/swmd_csi.bin
+[1006/1006] cmd.exe /C "cd /D "C:\Users\jafo0\OneDrive - University of Bahrain\Desktop\Senior-Project-Clone\firmware\build\esp-idf\esptool_py" && C:\Espressif\python_env\idf5.3_py3.13_env\Scripts\python.exe C:/Espressif/frameworks/esp-idf-v5.3.1/components/partition_table/check_sizes.py --offset 0x8000 partition --type app "C:/Users/jafo0/OneDrive - University of Bahrain/Desktop/Senior-Project-Clone/firmware/build/partition_table/partition-table.bin" "C:/Users/jafo0/OneDrive - University of Bahrain/Desktop/Senior-Project-Clone/firmware/build/swmd_csi.bin""
+swmd_csi.bin binary size 0xbebb0 bytes. Smallest app partition is 0x100000 bytes. 0x41450 bytes (25%) free.

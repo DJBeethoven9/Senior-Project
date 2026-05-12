@@ -160,7 +160,7 @@ CMAKE_INSTALL_MANDIR:PATH=
 CMAKE_INSTALL_OLDINCLUDEDIR:PATH=/usr/include
 
 //Install path prefix, prepended onto install directories.
-CMAKE_INSTALL_PREFIX:PATH=C:/Program Files (x86)/smha_csi
+CMAKE_INSTALL_PREFIX:PATH=C:/Program Files (x86)/swmd_csi
 
 //Run-time variable data (LOCALSTATEDIR/run)
 CMAKE_INSTALL_RUNSTATEDIR:PATH=
@@ -216,7 +216,7 @@ CMAKE_PROJECT_DESCRIPTION:STATIC=
 CMAKE_PROJECT_HOMEPAGE_URL:STATIC=
 
 //Value Computed by CMake
-CMAKE_PROJECT_NAME:STATIC=smha_csi
+CMAKE_PROJECT_NAME:STATIC=swmd_csi
 
 //Value Computed by CMake
 CMAKE_PROJECT_VERSION:STATIC=3.6.0
@@ -389,13 +389,13 @@ mbedx509_LIB_DEPENDS:STATIC=general;__idf_cxx;general;__idf_newlib;general;__idf
 p256m_LIB_DEPENDS:STATIC=general;__idf_cxx;general;__idf_newlib;general;__idf_freertos;general;__idf_esp_hw_support;general;__idf_heap;general;__idf_log;general;__idf_soc;general;__idf_hal;general;__idf_esp_rom;general;__idf_esp_common;general;__idf_esp_system;general;__idf_xtensa;
 
 //Value Computed by CMake
-smha_csi_BINARY_DIR:STATIC=C:/Users/jafo0/OneDrive - University of Bahrain/Desktop/Senior-Project-Clone/firmware/build
+swmd_csi_BINARY_DIR:STATIC=C:/Users/jafo0/OneDrive - University of Bahrain/Desktop/Senior-Project-Clone/firmware/build
 
 //Value Computed by CMake
-smha_csi_IS_TOP_LEVEL:STATIC=ON
+swmd_csi_IS_TOP_LEVEL:STATIC=ON
 
 //Value Computed by CMake
-smha_csi_SOURCE_DIR:STATIC=C:/Users/jafo0/OneDrive - University of Bahrain/Desktop/Senior-Project-Clone/firmware
+swmd_csi_SOURCE_DIR:STATIC=C:/Users/jafo0/OneDrive - University of Bahrain/Desktop/Senior-Project-Clone/firmware
 
 
 ########################
@@ -597,7 +597,7 @@ FIND_PACKAGE_MESSAGE_DETAILS_Threads:INTERNAL=[TRUE][v()]
 //ADVANCED property for variable: GIT_EXECUTABLE
 GIT_EXECUTABLE-ADVANCED:INTERNAL=1
 //CMAKE_INSTALL_PREFIX during last run
-_GNUInstallDirs_LAST_CMAKE_INSTALL_PREFIX:INTERNAL=C:/Program Files (x86)/smha_csi
+_GNUInstallDirs_LAST_CMAKE_INSTALL_PREFIX:INTERNAL=C:/Program Files (x86)/swmd_csi
 _Python3_EXECUTABLE:INTERNAL=C:/Espressif/python_env/idf5.3_py3.13_env/Scripts/python.exe
 //Python3 Properties
 _Python3_INTERPRETER_PROPERTIES:INTERNAL=Python;3;13;13;32;;;C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3568.0_x64__qbz5n2kfra8p0\Lib;C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3568.0_x64__qbz5n2kfra8p0\Lib;C:\Espressif\python_env\idf5.3_py3.13_env\Lib\site-packages;C:\Espressif\python_env\idf5.3_py3.13_env\Lib\site-packages

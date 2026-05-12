@@ -1,4 +1,4 @@
-# SMHA - Wi-Fi CSI Human Presence Detection
+# SWMD - Wi-Fi CSI Human Presence Detection
 
 **Current flow**: one ESP32-S3 detects human presence in a room by
 observing variance in Wi-Fi Channel State Information (CSI). No camera,
@@ -125,8 +125,8 @@ Expected output during boot:
 ```
 ... bootloader output ...
 I (xxx) wifi:wifi driver task: ...
-I (xxx) SMHA: Got IP 192.168.x.y, gw 192.168.x.1
-I (xxx) SMHA: CSI streaming started
+I (xxx) SWMD: Got IP 192.168.x.y, gw 192.168.x.1
+I (xxx) SWMD: CSI streaming started
 CSI,1234567,-43,11,0,0,0,6,128,[ ... 128 signed bytes ...]
 CSI,1334567,-44,11,0,0,0,6,128,[ ... ]
 ...

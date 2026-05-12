@@ -1,6 +1,6 @@
 {
     "version":            "1.1",
-    "project_name":       "smha_csi",
+    "project_name":       "swmd_csi",
     "project_version":    "e6d20ab-dirty",
     "project_path":       "C:/Users/jafo0/OneDrive - University of Bahrain/Desktop/Senior-Project-Clone/firmware",
     "idf_path":           "C:/Espressif/frameworks/esp-idf-v5.3.1",
@@ -8,8 +8,8 @@
     "config_file":        "C:/Users/jafo0/OneDrive - University of Bahrain/Desktop/Senior-Project-Clone/firmware/sdkconfig",
     "config_defaults":    "C:/Users/jafo0/OneDrive - University of Bahrain/Desktop/Senior-Project-Clone/firmware/sdkconfig.defaults",
     "bootloader_elf":     "C:/Users/jafo0/OneDrive - University of Bahrain/Desktop/Senior-Project-Clone/firmware/build/bootloader/bootloader.elf",
-    "app_elf":            "smha_csi.elf",
-    "app_bin":            "smha_csi.bin",
+    "app_elf":            "swmd_csi.elf",
+    "app_bin":            "swmd_csi.bin",
     "build_type":         "flash_app",
     "git_revision":       "v5.3.1-dirty",
     "target":             "esp32s3",

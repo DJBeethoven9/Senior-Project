@@ -379,7 +379,7 @@ def _new_detector(args: argparse.Namespace) -> PresenceDetector:
 
 
 def main():
-    p = argparse.ArgumentParser(description="SMHA single-node CSI backend")
+    p = argparse.ArgumentParser(description="SWMD single-node CSI backend")
     p.add_argument("--usb", nargs="+", default=None,
                    help="USB serial port for the ESP32-S3, e.g. --usb COM7")
     p.add_argument("--udp", nargs="+", type=int, default=None,

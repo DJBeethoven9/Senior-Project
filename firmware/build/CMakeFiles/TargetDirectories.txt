@@ -12,7 +12,7 @@ C:/Users/jafo0/OneDrive - University of Bahrain/Desktop/Senior-Project-Clone/fir
 C:/Users/jafo0/OneDrive - University of Bahrain/Desktop/Senior-Project-Clone/firmware/build/CMakeFiles/flash.dir
 C:/Users/jafo0/OneDrive - University of Bahrain/Desktop/Senior-Project-Clone/firmware/build/CMakeFiles/encrypted-flash.dir
 C:/Users/jafo0/OneDrive - University of Bahrain/Desktop/Senior-Project-Clone/firmware/build/CMakeFiles/_project_elf_src.dir
-C:/Users/jafo0/OneDrive - University of Bahrain/Desktop/Senior-Project-Clone/firmware/build/CMakeFiles/smha_csi.elf.dir
+C:/Users/jafo0/OneDrive - University of Bahrain/Desktop/Senior-Project-Clone/firmware/build/CMakeFiles/swmd_csi.elf.dir
 C:/Users/jafo0/OneDrive - University of Bahrain/Desktop/Senior-Project-Clone/firmware/build/CMakeFiles/size.dir
 C:/Users/jafo0/OneDrive - University of Bahrain/Desktop/Senior-Project-Clone/firmware/build/CMakeFiles/size-files.dir
 C:/Users/jafo0/OneDrive - University of Bahrain/Desktop/Senior-Project-Clone/firmware/build/CMakeFiles/size-components.dir

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
-  <title>SMHA — Presence Radar</title>
+  <title>SWMD — Presence Radar</title>
   <style>
     :root { color-scheme: dark; }
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -294,7 +294,7 @@
 <body>
 
 <header>
-  <div class="logo">SMHA<sub>Wi-Fi CSI Presence Radar</sub></div>
+  <div class="logo">SWMD<sub>Wi-Fi CSI Presence Radar</sub></div>
   <div id="status-pill" class="s-waiting">◌ WAITING…</div>
   <div id="conf-header">confidence <span id="conf-val">—</span></div>
 </header>
@@ -340,8 +340,8 @@
 const DEFAULT_POS = {
   COM7: { x: 0.18, y: 0.35 },
 };
-let boardPos = JSON.parse(localStorage.getItem('smha-pos') || 'null') || structuredClone(DEFAULT_POS);
-function savePOS() { localStorage.setItem('smha-pos', JSON.stringify(boardPos)); }
+let boardPos = JSON.parse(localStorage.getItem('swmd-pos') || 'null') || structuredClone(DEFAULT_POS);
+function savePOS() { localStorage.setItem('swmd-pos', JSON.stringify(boardPos)); }
 function doResetPos() { boardPos = structuredClone(DEFAULT_POS); savePOS(); }
 function getPos(port) { return boardPos[port] ?? { x: 0.5, y: 0.5 }; }
 

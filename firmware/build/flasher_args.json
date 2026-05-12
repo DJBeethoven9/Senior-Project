@@ -9,11 +9,11 @@
     },
     "flash_files" : {
         "0x0" : "bootloader/bootloader.bin",
-        "0x10000" : "smha_csi.bin",
+        "0x10000" : "swmd_csi.bin",
         "0x8000" : "partition_table/partition-table.bin"
     },
     "bootloader" : { "offset" : "0x0", "file" : "bootloader/bootloader.bin", "encrypted" : "false" },
-    "app" : { "offset" : "0x10000", "file" : "smha_csi.bin", "encrypted" : "false" },
+    "app" : { "offset" : "0x10000", "file" : "swmd_csi.bin", "encrypted" : "false" },
     "partition-table" : { "offset" : "0x8000", "file" : "partition_table/partition-table.bin", "encrypted" : "false" },
     "extra_esptool_args" : {
         "after"  : "hard_reset",

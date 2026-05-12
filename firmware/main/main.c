@@ -1,5 +1,5 @@
 /*
- * SMHA Phase 1 - ESP32-S3 CSI capture firmware (ESP-IDF v5.3.x)
+ * SWMD Phase 1 - ESP32-S3 CSI capture firmware (ESP-IDF v5.3.x)
  *
  * Connects to a 2.4 GHz AP, pings the gateway at 10 Hz to guarantee a
  * steady RX stream (CSI is computed only on RX), enables the CSI engine,
@@ -27,7 +27,7 @@
 #define WIFI_SSID         "csi-test"
 #define WIFI_PASS         "12345678"
 #define PING_INTERVAL_MS  100      /* 10 Hz CSI rate */
-#define TAG               "SMHA"
+#define TAG               "SWMD"
 
 static void csi_rx_cb(void *ctx, wifi_csi_info_t *info)
 {
