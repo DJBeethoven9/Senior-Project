@@ -289,6 +289,77 @@
     }
     button:hover { background: #30363d; }
     .footer-hint { font-size: 10px; color: #484f58; }
+
+    /* ── audit log ── */
+    .audit-toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    .audit-toolbar h3 { margin: 0; }
+    .audit-btns { display: flex; gap: 4px; }
+    .audit-btns button {
+      padding: 2px 7px;
+      font-size: 9px;
+      letter-spacing: 0.06em;
+      border-radius: 4px;
+    }
+    #audit-list {
+      max-height: 280px;
+      overflow-y: auto;
+      font-family: ui-monospace, Consolas, monospace;
+      font-size: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+    .audit-row {
+      display: flex;
+      gap: 7px;
+      padding: 4px 6px;
+      border-radius: 4px;
+      background: #080c12;
+      border-left: 2px solid #1c2333;
+    }
+    .audit-row.evt-presence { border-left-color: #cf222e; }
+    .audit-row.evt-clear    { border-left-color: #3fb950; }
+    .audit-row.evt-calib    { border-left-color: #58a6ff; }
+    .audit-row.evt-system   { border-left-color: #d29922; }
+    .audit-time { color: #6e7681; flex-shrink: 0; }
+    .audit-msg  { color: #c9d1d9; }
+    .audit-empty {
+      text-align: center;
+      color: #484f58;
+      font-size: 10px;
+      padding: 14px 0;
+      font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+    }
+
+    /* ── presence alert toast (top-left) ── */
+    #alert-toast {
+      position: fixed;
+      top: 64px;
+      left: 18px;
+      transform: translateX(-20px);
+      padding: 10px 18px;
+      background: linear-gradient(135deg, #2d0c0c 0%, #3a1010 100%);
+      color: #ff7b72;
+      border: 1px solid #9e2a2a;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      box-shadow: 0 8px 26px rgba(0, 0, 0, 0.45), 0 0 16px rgba(255, 80, 80, 0.3);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.35s ease, transform 0.35s ease;
+      z-index: 100;
+    }
+    #alert-toast.visible {
+      opacity: 1;
+      transform: translateX(0);
+    }
   </style>
 </head>
 <body>
@@ -298,6 +369,8 @@
   <div id="status-pill" class="s-waiting">◌ WAITING…</div>
   <div id="conf-header">confidence <span id="conf-val">—</span></div>
 </header>
+
+<div id="alert-toast">● PERSON DETECTED</div>
 
 <main>
   <div id="room-wrap">
@@ -322,6 +395,16 @@
     <div class="sb-section">
       <h3>System</h3>
       <div class="meta-grid" id="sys-meta"></div>
+    </div>
+    <div class="sb-section">
+      <div class="audit-toolbar">
+        <h3>Audit Log</h3>
+        <div class="audit-btns">
+          <button onclick="exportAuditLog()">CSV</button>
+          <button onclick="clearAuditLog()">Clear</button>
+        </div>
+      </div>
+      <div id="audit-list"></div>
     </div>
   </div>
 </main>
@@ -817,6 +900,103 @@ function drawMiniHeatmap(canvasEl, values) {
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   AUDIT LOG — persists status events with timestamps in localStorage
+═══════════════════════════════════════════════════════════════ */
+const AUDIT_KEY = 'swmd-audit';
+const AUDIT_MAX = 200;
+let auditLog = JSON.parse(localStorage.getItem(AUDIT_KEY) || '[]');
+
+function logEvent(kind, msg) {
+  auditLog.unshift({ t: Date.now(), kind, msg });
+  if (auditLog.length > AUDIT_MAX) auditLog.length = AUDIT_MAX;
+  localStorage.setItem(AUDIT_KEY, JSON.stringify(auditLog));
+  renderAuditLog();
+}
+
+function pad2(n) { return n < 10 ? '0' + n : '' + n; }
+function fmtTime(ts) {
+  const d = new Date(ts);
+  return pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
+}
+function fmtFullTime(ts) {
+  const d = new Date(ts);
+  return d.getFullYear() + '-' + pad2(d.getMonth()+1) + '-' + pad2(d.getDate())
+       + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
+}
+
+function renderAuditLog() {
+  const wrap = document.getElementById('audit-list');
+  if (!wrap) return;
+  if (!auditLog.length) {
+    wrap.innerHTML = '<div class="audit-empty">No events yet.</div>';
+    return;
+  }
+  wrap.innerHTML = auditLog.map(e =>
+    `<div class="audit-row evt-${e.kind}">
+       <span class="audit-time">${fmtTime(e.t)}</span>
+       <span class="audit-msg">${e.msg}</span>
+     </div>`
+  ).join('');
+}
+
+function clearAuditLog() {
+  if (!confirm('Clear all ' + auditLog.length + ' audit entries?')) return;
+  auditLog = [];
+  localStorage.removeItem(AUDIT_KEY);
+  renderAuditLog();
+  logEvent('system', 'Audit log cleared');
+}
+
+function exportAuditLog() {
+  if (!auditLog.length) { alert('Nothing to export.'); return; }
+  const rows = [['timestamp', 'event_type', 'message']];
+  for (const e of auditLog) rows.push([fmtFullTime(e.t), e.kind, e.msg]);
+  const csv = rows.map(r =>
+    r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')
+  ).join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  const d    = new Date();
+  a.href     = url;
+  a.download = `swmd-audit-${d.getFullYear()}${pad2(d.getMonth()+1)}${pad2(d.getDate())}-${pad2(d.getHours())}${pad2(d.getMinutes())}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+renderAuditLog();
+
+/* ═══════════════════════════════════════════════════════════════
+   PRESENCE ALERT TOAST — shows for 5s on transition into PRESENCE
+   Also writes presence/calibration transitions to the audit log.
+═══════════════════════════════════════════════════════════════ */
+let _prevStatus = null;
+let _alertTimer = null;
+function checkPresenceAlert(s) {
+  const now = s.status || null;
+
+  if (now === 'PRESENCE' && _prevStatus !== 'PRESENCE') {
+    logEvent('presence', `Presence detected (conf ${(s.confidence??0).toFixed(1)}%)`);
+    const toast = document.getElementById('alert-toast');
+    if (toast) {
+      toast.classList.add('visible');
+      if (_alertTimer) clearTimeout(_alertTimer);
+      _alertTimer = setTimeout(() => toast.classList.remove('visible'), 5000);
+    }
+  }
+  if (_prevStatus === 'PRESENCE' && now && now !== 'PRESENCE') {
+    logEvent('clear', 'Room cleared');
+  }
+  if (now === 'CALIBRATING' && _prevStatus !== 'CALIBRATING' && _prevStatus !== null) {
+    logEvent('calib', 'Calibration started');
+  }
+  if (_prevStatus === 'CALIBRATING' && now && now !== 'CALIBRATING') {
+    logEvent('calib', 'Calibration finished');
+  }
+
+  _prevStatus = now;
+}
+
+/* ═══════════════════════════════════════════════════════════════
    STATUS PILL
 ═══════════════════════════════════════════════════════════════ */
 function updatePill(s) {
@@ -873,11 +1053,17 @@ async function pollStatus() {
     updatePill(lastStatus);
     updateSidebar(lastStatus);
     updateSysMeta(lastStatus);
+    checkPresenceAlert(lastStatus);
   } catch {
     document.getElementById('status-pill').textContent = '✕ BACKEND OFFLINE';
     document.getElementById('status-pill').className   = 's-waiting';
+    if (_backendOnline !== false) { logEvent('system', 'Backend offline'); _backendOnline = false; }
+    return;
   }
+  if (_backendOnline === false) { logEvent('system', 'Backend reconnected'); }
+  _backendOnline = true;
 }
+let _backendOnline = null;
 
 async function pollHeatmap() {
   try {
@@ -891,6 +1077,7 @@ async function pollHeatmap() {
 }
 
 async function doRecalibrate() {
+  logEvent('system', 'Recalibrate requested');
   await fetch('/reset', { method: 'POST' });
   pollStatus();
 }
